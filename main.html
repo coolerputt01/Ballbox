@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ballbox</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" integrity="sha512-Kc323vGBEqzTmouAECnVceyQqyqdsSiqLQISBL29aUW4U/M7pSPA/gEUZQqv1cwx4OnYxTxve5UMg5GT6L4JJg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pangolin&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      overflow: hidden;
+      
+      font-family: "Pangolin", cursive;
+    }
+    body{
+      background-image: conic-gradient(red, black, blue);
+    }
+    .canvas {
+      background: #D5D5D5;
+      display: block;
+      margin: 0 auto;
+      box-shadow: inset 1px 1px 3px 3px orange;
+      position: relative;
+    }
+
+    .score {
+      position: absolute;
+      top: 1%;
+      left: 10%;
+      background-color: #f1f1f2;
+      color: white;
+    }
+
+    #score {
+      background-color: #D5D5D5;
+      padding: 5px;
+      z-index: -1;
+      font-size:1.2em;
+    }
+
+    .buttons button {
+      padding: 30px;
+      text-align: center;
+      border: none;
+      outline: none;
+      border-radius: 20px;
+      background: #d5d5d5;
+    }
+
+    .buttons button i {
+      font-size: 2.5em;
+      font-weight: bold;
+      background: #d5d5d5;
+    }
+
+    .buttons {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 40%;
+      opacity: 1;
+    }
+
+    button:hover {
+      opacity: 0.7;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas class="canvas" width="300" height="320"></canvas>
+  <p class="score"><em id="score"></em></p>
+  <div class="buttons">
+    <button id="left"><i class="fa-solid fa-caret-left"></i></button>
+    <button id="right"><i class="fa-solid fa-caret-right"></i></button>
+  </div>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getFirestore, collection, getDocs,getDoc, doc, updateDoc ,setDoc} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyD3YvZVubkRDvNcb6Hc3nxOBfhsCWjZh40",
+      authDomain: "breakout-2fb35.firebaseapp.com",
+      projectId: "breakout-2fb35",
+      storageBucket: "breakout-2fb35.appspot.com",
+      messagingSenderId: "349383454205",
+      appId: "1:349383454205:web:d0c157b46012fa737afd94"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const colRef = collection(db, 'playerinfo');
+
+    const leftbtn = document.getElementById("left");
+    const rightbtn = document.getElementById("right");
+    const canvas = document.querySelector(".canvas");
+    const ctx = canvas.getContext("2d");
+    let paddleColor = "orangered";
+
+    let paddleHeight = 20;
+    let paddleWidth = 50;
+    let paddleX = (canvas.width - paddleWidth) / 2;
+    let ballRadius = 10;
+    let x = canvas.width / 2;
+    let y = canvas.height - 30;
+    let dx = Math.random() < 0.5 ? Math.random() * 3 + 1 : -(Math.random() * 3 + 1);
+    let dy = -(Math.random() * 3) + 1;
+    let rightPressed = false;
+    let leftPressed = false;
+    let blockRowCount = 3;
+    let blockColumnCount = 3;
+    let blockWidth = 75;
+    let blockHeight = 20;
+    let blockPadding = 10;
+    let blockOffsetTop = 30;
+    let blockOffsetLeft = 30;
+    let score = 0;
+    const username = localStorage.getItem("playerusername");
+
+    let blocks = [];
+    for (let c = 0; c < blockColumnCount; c++) {
+      blocks[c] = [];
+      for (let r = 0; r < blockRowCount; r++) {
+        blocks[c][r] = { x: 0, y: 0, status: 1, isBreaking: false, breakAnimationFrame: 0 };
+      }
+    }
+   function allBlocksDestroyed() {
+     for (let c = 0; c < blockColumnCount; c++) {
+       for (let r = 0; r < blockRowCount; r++) {
+         if (blocks[c][r].status === 1) {
+           return false; // Found an active block, not all blocks are destroyed
+         }
+       }
+     }
+     return true; // All blocks are destroyed
+   }
+    leftbtn.addEventListener("click", () => { if (paddleX > 0) paddleX -= 30; });
+    rightbtn.addEventListener("click", () => { if (paddleX < canvas.width - paddleWidth) paddleX += 30; });
+
+    document.addEventListener("keydown", keyDownHandler);
+    document.addEventListener("keyup", keyUpHandler);
+
+    function keyDownHandler(e) { if (e.key === "ArrowRight") rightPressed = true; else if (e.key === "ArrowLeft") leftPressed = true; }
+    function keyUpHandler(e) { if (e.key === "ArrowRight") rightPressed = false; else if (e.key === "ArrowLeft") leftPressed = false; }
+
+    function collisionDetection() {
+      for (let c = 0; c < blockColumnCount; c++) {
+        for (let r = 0; r < blockRowCount; r++) {
+          let b = blocks[c][r];
+          if (b.status == 1 && x > b.x && x < b.x + blockWidth && y > b.y && y < b.y + blockHeight) {
+            dy = -dy;
+            b.isBreaking = true;
+            score += 5;
+            b.status = 0;
+            if (username) updateScoreInFirestore(username, score);
+          }
+        }
+      }
+    }
+
+    function drawBall() {
+      ctx.beginPath();
+      ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+      ctx.fillStyle = "#0095DD";
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    function drawBlocks() {
+      for (let c = 0; c < blockColumnCount; c++) {
+        for (let r = 0; r < blockRowCount; r++) {
+          let b = blocks[c][r];
+          if (b.status == 1 || b.isBreaking) {
+            b.x = c * (blockWidth + blockPadding) + blockOffsetLeft;
+            b.y = r * (blockHeight + blockPadding) + blockOffsetTop;
+            if (b.isBreaking) {
+              b.breakAnimationFrame++;
+              if (b.breakAnimationFrame > 10) b.status = 0;
+              ctx.globalAlpha = 1 - b.breakAnimationFrame / 10;
+            }
+            ctx.beginPath();
+            ctx.rect(b.x, b.y, blockWidth, blockHeight);
+            ctx.fillStyle = b.isBreaking ? "#FFFFFF" : "#FF5733";
+            ctx.fill();
+            ctx.closePath();
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+    }
+
+    function drawPaddle() {
+      ctx.beginPath();
+      ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+      ctx.fillStyle = paddleColor;
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    function drawScore() { document.getElementById('score').innerText = `Score : ${score}`; }
+
+function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawScore();
+      drawBlocks();
+      drawBall();
+      drawPaddle();
+      collisionDetection();
+    
+      if(allBlocksDestroyed()){
+        localStorage.setItem("score", score); // Save the score in localStorage
+          document.location.href = "leaderboard.html"; // Redirect to leaderboard
+          return; // Stop further execution of draw
+      }
+    
+    
+      // Ball collision with the walls
+      if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+        dx = -dx;
+      }
+    
+      // Ball collision with the top of the canvas
+      if (y + dy < ballRadius) {
+        dy = -dy;
+      }
+    
+      // Ball collision with the paddle
+      else if (y + dy > canvas.height - paddleHeight - ballRadius) {
+        if (x > paddleX && x < paddleX + paddleWidth) {
+          dy = -dy; // Reverse the ball's direction
+        } else {
+          // Ball hit the bottom, save score and redirect to leaderboard
+          localStorage.setItem("score", score); // Save the score in localStorage
+          document.location.href = "leaderboard.html"; // Redirect to leaderboard
+          return; // Stop further execution of draw
+        }
+      }
+    
+      // Paddle movement
+      if (rightPressed && paddleX < canvas.width - paddleWidth) {
+        paddleX += 7;
+      } else if (leftPressed && paddleX > 0) {
+        paddleX -= 7;
+      }
+    
+      x += dx;
+      y += dy;
+      requestAnimationFrame(draw);
+    }
+
+    async function updateScoreInFirestore(name, score) {
+      const playerDoc = doc(collection(db, "playerinfo"), name);
+      const docSnapshot = await getDoc(playerDoc);
+
+      if (docSnapshot.exists()) {
+        const data = docSnapshot.data();
+        paddleColor = data.color || paddleColor; // Use stored color or default if not found
+      } else {
+        console.log("No player data found, using default paddle color.");
+      }
+      try {
+        
+        await setDoc(playerDoc, { score: score },{merge :true});
+      } catch (error) {
+        console.error("Error updating score in Firestore: ", error.message);
+      }
+    }
+
+  // Audio setup (unchanged)
+      const audioContext = new(window.AudioContext || window.webkitAudioContext)();
+      let backgroundBuffer;
+    
+      async function preloadAudio() {
+        const response = await fetch('song.wav'); // Replace with your music file
+        const arrayBuffer = await response.arrayBuffer();
+        backgroundBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      }
+    
+      function playBackgroundMusic() {
+        const source = audioContext.createBufferSource();
+        source.buffer = backgroundBuffer;
+        source.connect(audioContext.destination);
+        source.loop = true; // Keeps the music looping
+        source.start(0);
+      }
+    
+      preloadAudio();
+    
+      document.querySelector('body').addEventListener('click', () => {
+        if (audioContext.state === 'suspended') {
+          audioContext.resume(); // Resumes the audio context if suspended
+        }
+        if (backgroundBuffer) playBackgroundMusic(); // Play if the buffer is ready
+      }, { once: true }); // Ensure this listener only runs once
+
+    // Start game and play music
+    window.onload = function () {
+      draw();
+    };
+  </script>
+</body>
+
+</html>
